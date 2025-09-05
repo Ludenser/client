@@ -60,6 +60,20 @@ docker build -t YOUR_DH_USER/vkcomments:latest .
 docker push YOUR_DH_USER/vkcomments:latest
 ```
 
+CI/CD (GitHub Actions → Docker Hub)
+1) Зайдите в Settings → Secrets and variables → Actions и добавьте секреты:
+   - DOCKERHUB_USERNAME — ваш логин Docker Hub (например, ludenser)
+   - DOCKERHUB_TOKEN — токен доступа (Docker Hub → Account Settings → Security → New Access Token)
+   - Опционально: DOCKER_IMAGE — полное имя образа (по умолчанию используется ludenser/vk_comments_exporter)
+2) В репозитории есть workflow .github/workflows/docker.yml. Он:
+   - собирает образ по Dockerfile в корне;
+   - пушит теги latest, по git tag, и по SHA коммита;
+   - запускается при push в main/master и вручную (workflow_dispatch).
+3) Деплой на сервере: просто выполните scripts/update.sh или
+   ```bash
+   docker pull ludenser/vk_comments_exporter:latest && docker rm -f vkcomments && docker run -d --name vkcomments --restart unless-stopped -p 8080:8080 ludenser/vk_comments_exporter:latest
+   ```
+
 Reverse proxy и HTTPS (опционально)
 - Быстрее всего Caddy:
   ```bash
