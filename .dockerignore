@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+Dockerfile*
+.dockerignore
+.git
+.gitignore
+**/.env
+**/.env.*
+**/.DS_Store
+client/node_modules
+server/node_modules
+client/dist
+client/.vite
+server/.cache
+**/coverage
+**/.nyc_output
