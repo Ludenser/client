@@ -1,28 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import Select from "./Select.jsx";
+import { toCsv } from "../lib/csv.js";
+import { buildAuthUrl, detectRunMode, parseVideoUrl } from "../lib/utils.js";
+import { fetchAllCommentsClient } from "../lib/vk.js";
+import AuthSection from "./sections/AuthSection.jsx";
+import VideoSection from "./sections/VideoSection.jsx";
 
 const APP_ID_DEFAULT = "";
-
-function buildAuthUrl(appId, scope) {
-  // Используем официальный редирект VK для Standalone/Implicit Flow,
-  // чтобы не требовать настройки redirect_uri в приложении
-  const redirect = "https://oauth.vk.com/blank.html";
-  const params = new URLSearchParams({
-    client_id: appId,
-    display: "page",
-    redirect_uri: redirect,
-    scope,
-    response_type: "token",
-    v: "5.199",
-  });
-  return `https://oauth.vk.com/authorize?${params.toString()}`;
-}
-
-function parseVideoUrl(url) {
-  const m = String(url).match(/video(-?\d+)_([0-9]+)/);
-  if (!m) return {};
-  return { ownerId: Number(m[1]), videoId: Number(m[2]) };
-}
 
 export default function App() {
   const [appId, setAppId] = useState(APP_ID_DEFAULT);
@@ -50,6 +33,7 @@ export default function App() {
       return [];
     }
   });
+  const [runMode, setRunMode] = useState(() => detectRunMode());
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -69,20 +53,6 @@ export default function App() {
     () => (appId ? buildAuthUrl(appId, scope) : ""),
     [appId, scope]
   );
-
-  const tryExtractToken = (input) => {
-    try {
-      const str = String(input || "");
-      const fromHash = new URLSearchParams(str.replace(/^.*#/, ""));
-      const t1 = fromHash.get("access_token");
-      if (t1) return t1;
-      // если вставили просто токен без URL
-      if (/^vk\d?\./i.test(str) || str.length > 50) return str.trim();
-      return "";
-    } catch {
-      return "";
-    }
-  };
 
   // Автопарсинг ссылки при вводе
   useEffect(() => {
@@ -154,41 +124,60 @@ export default function App() {
     setMessage("Загрузка...");
     setMessageType("info");
     try {
-      const res = await fetch("/api/video/comments", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ ownerId: o, videoId: v }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        const msg = json?.message || res.statusText;
-        if (
-          /authorization failed|invalid token|expired|User authorization failed/i.test(
-            msg
-          )
-        ) {
-          localStorage.removeItem("vk_token");
-          setToken("");
-          setMessage("Токен недействителен или истёк. Авторизуйтесь заново.");
-          setMessageType("error");
-          return;
+      if (runMode === "client") {
+        const json = await fetchAllCommentsClient({
+          token,
+          ownerId: o,
+          videoId: v,
+        });
+        const blob = new Blob([JSON.stringify(json, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `vk-comments-${o}_${v}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setMessage("JSON выгружен.");
+        setMessageType("success");
+      } else {
+        const res = await fetch("/api/video/comments", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ ownerId: o, videoId: v }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          const msg = json?.message || res.statusText;
+          if (
+            /authorization failed|invalid token|expired|User authorization failed/i.test(
+              msg
+            )
+          ) {
+            localStorage.removeItem("vk_token");
+            setToken("");
+            setMessage("Токен недействителен или истёк. Авторизуйтесь заново.");
+            setMessageType("error");
+            return;
+          }
+          throw new Error(msg);
         }
-        throw new Error(msg);
+        const blob = new Blob([JSON.stringify(json, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `vk-comments-${o}_${v}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setMessage("JSON выгружен.");
+        setMessageType("success");
       }
-      const blob = new Blob([JSON.stringify(json, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `vk-comments-${o}_${v}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setMessage("JSON выгружен.");
-      setMessageType("success");
     } catch (e) {
       setMessage("Ошибка: " + e.message);
       setMessageType("error");
@@ -214,37 +203,55 @@ export default function App() {
     setMessage("Готовлю CSV...");
     setMessageType("info");
     try {
-      const res = await fetch(
-        `/api/video/comments.csv?ownerId=${o}&videoId=${v}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
+      if (runMode === "client") {
+        const json = await fetchAllCommentsClient({
+          token,
+          ownerId: o,
+          videoId: v,
+        });
+        const csv = await toCsv(json.comments);
+        const blob = new Blob(["\uFEFF" + csv], {
+          type: "text/csv;charset=utf-8",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `vk-comments-${o}_${v}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setMessage("CSV выгружен.");
+        setMessageType("success");
+      } else {
+        const res = await fetch(
+          `/api/video/comments.csv?ownerId=${o}&videoId=${v}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          const msg = json?.message || res.statusText;
+          if (
+            /authorization failed|invalid token|expired|User authorization failed/i.test(
+              msg
+            )
+          ) {
+            localStorage.removeItem("vk_token");
+            setToken("");
+            setMessage("Токен недействителен или истёк. Авторизуйтесь заново.");
+            setMessageType("error");
+            return;
+          }
+          throw new Error(msg);
         }
-      );
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        const msg = json?.message || res.statusText;
-        if (
-          /authorization failed|invalid token|expired|User authorization failed/i.test(
-            msg
-          )
-        ) {
-          localStorage.removeItem("vk_token");
-          setToken("");
-          setMessage("Токен недействителен или истёк. Авторизуйтесь заново.");
-          setMessageType("error");
-          return;
-        }
-        throw new Error(msg);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `vk-comments-${o}_${v}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setMessage("CSV выгружен.");
+        setMessageType("success");
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `vk-comments-${o}_${v}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setMessage("CSV выгружен.");
-      setMessageType("success");
     } catch (e) {
       setMessage("Ошибка: " + e.message);
       setMessageType("error");
@@ -261,160 +268,33 @@ export default function App() {
         </h1>
       </div>
 
-      <section className="mb-6 rounded-2xl p-5 border border-white/10 bg-white/10 backdrop-blur-md shadow-xl">
-        <h3 className="text-lg font-medium mb-3">1) Авторизация</h3>
-        <ol className="text-sm text-gray-300 mb-3 leading-relaxed list-decimal list-inside space-y-1">
-          <li>
-            Введите ваш <span className="font-semibold">APP_ID</span> и нажмите
-            <span className="font-semibold"> «Открыть окно авторизации»</span>.
-          </li>
-          <li>
-            Разрешите доступ и на странице
-            <code className="mx-1 px-1 py-0.5 bg-black/30 rounded">
-              blank.html
-            </code>
-            скопируйте адрес со строкой
-            <code className="mx-1 px-1 py-0.5 bg-black/30 rounded">
-              #access_token=...
-            </code>
-            .
-          </li>
-          <li>
-            Вставьте сюда полный адрес или сам token — он сохранится
-            автоматически.
-          </li>
-        </ol>
-        <div className="flex flex-col sm:flex-row gap-2 sm:items-center mb-3">
-          <input
-            className="border border-white/20 bg-black/20 text-gray-100 placeholder-gray-400 rounded px-3 py-2 w-full sm:w-40 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-            placeholder="APP_ID"
-            value={appId}
-            onChange={(e) => setAppId(e.target.value)}
-          />
-          <Select
-            className="sm:w-36 w-full"
-            value={scope}
-            onChange={(v) => setScope(v)}
-            options={[{ value: "video", label: "video" }]}
-          />
-          <a
-            href={authUrl || "#"}
-            target={authUrl ? "_blank" : "_self"}
-            rel="noreferrer"
-          >
-            <button
-              className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition disabled:opacity-50"
-              disabled={!authUrl}
-            >
-              Открыть окно авторизации
-            </button>
-          </a>
-        </div>
-        <div className="flex flex-col sm:flex-row gap-2 sm:items-center mb-3">
-          <Select
-            className="sm:w-64 w-full"
-            value={appIds.includes(appId) ? appId : ""}
-            onChange={(v) => setAppId(v)}
-            options={[
-              { value: "", label: "Выбрать из сохранённых…" },
-              ...appIds.map((id) => ({ value: id, label: id })),
-            ]}
-          />
-          <button
-            className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg transition"
-            onClick={addAppId}
-          >
-            Сохранить APP_ID
-          </button>
-          <button
-            className="bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 rounded-lg transition"
-            onClick={() => appId && removeAppId(appId)}
-          >
-            Удалить выбранный
-          </button>
-          <button
-            className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg transition"
-            onClick={clearAppIds}
-          >
-            Очистить список
-          </button>
-        </div>
-        <div>
-          <input
-            className="border border-white/20 bg-black/20 text-gray-100 placeholder-gray-400 rounded px-3 py-2 w-full focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-            placeholder="#access_token=... или вставьте сам token"
-            onChange={(e) => {
-              const extracted = tryExtractToken(e.target.value);
-              if (extracted) {
-                localStorage.setItem("vk_token", extracted);
-                setToken(extracted);
-                setMessage("Токен сохранён.");
-                setMessageType("success");
-                setToast({ type: "success", text: "Токен сохранён" });
-                if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-                toastTimerRef.current = setTimeout(() => setToast(null), 4000);
-              }
-            }}
-          />
-        </div>
-        <div className="mt-2 text-sm text-gray-300">
-          Текущий токен: {token ? "установлен" : "—"}
-        </div>
-      </section>
+      <AuthSection
+        appId={appId}
+        setAppId={setAppId}
+        scope={scope}
+        setScope={setScope}
+        token={token}
+        setToken={setToken}
+        appIds={appIds}
+        addAppId={addAppId}
+        removeAppId={removeAppId}
+        clearAppIds={clearAppIds}
+        setMessage={setMessage}
+        setMessageType={setMessageType}
+        setToast={setToast}
+        toastTimerRef={toastTimerRef}
+      />
 
-      <section className="mb-6 rounded-2xl p-5 border border-white/10 bg-white/10 backdrop-blur-md shadow-xl">
-        <h3 className="text-lg font-medium mb-3">
-          2) Видеоссылка или ручной ввод
-        </h3>
-        <p className="text-sm text-gray-300 mb-3 leading-relaxed">
-          Вставьте ссылку вида{" "}
-          <code className="px-1 py-0.5 bg-black/30 rounded">
-            https://vk.com/video-OWNER_VIDEO
-          </code>{" "}
-          — ownerId и videoId подставятся автоматически. Можно указать вручную
-          ниже.
-        </p>
-        <div className="flex gap-2 mb-3">
-          <input
-            className="border border-white/20 bg-black/20 text-gray-100 placeholder-gray-400 rounded px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-            placeholder="https://vk.com/video-OWNER_VIDEO"
-            value={videoUrl}
-            onChange={(e) => setVideoUrl(e.target.value)}
-          />
-          <button
-            className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition"
-            onClick={onParseVideo}
-          >
-            Распарсить
-          </button>
-        </div>
-        {urlHistory.length > 0 && (
-          <div className="mb-3 inline-block w-full sm:w-2/3">
-            <Select
-              value={""}
-              onChange={(v) => v && setVideoUrl(v)}
-              options={[
-                { value: "", label: "Выбрать из последних ссылок…" },
-                ...urlHistory.map((u) => ({ value: u, label: u })),
-              ]}
-            />
-          </div>
-        )}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <input
-            className="border border-white/20 bg-black/20 text-gray-100 placeholder-gray-400 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-            placeholder="ownerId"
-            value={ownerId}
-            onChange={(e) => setOwnerId(e.target.value)}
-          />
-          <input
-            className="border border-white/20 bg-black/20 text-gray-100 placeholder-gray-400 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-            placeholder="videoId"
-            value={videoId}
-            onChange={(e) => setVideoId(e.target.value)}
-          />
-        </div>
-      </section>
+      <VideoSection
+        videoUrl={videoUrl}
+        setVideoUrl={setVideoUrl}
+        ownerId={ownerId}
+        setOwnerId={setOwnerId}
+        videoId={videoId}
+        setVideoId={setVideoId}
+        urlHistory={urlHistory}
+        onParseVideo={onParseVideo}
+      />
 
       {token &&
         Number.isFinite(Number(ownerId)) &&
