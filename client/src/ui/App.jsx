@@ -307,7 +307,7 @@ export default function App() {
           <p className="text-sm text-gray-300 mb-3 leading-relaxed">
             Нажмите «Скачать JSON» для полного дерева комментариев, или «Скачать
             CSV» для импорта в Excel/Google Таблицы. В Google Sheets: Файл →
-            Импорт → Загрузить → выберите CSV → Разделитель «точка с запятой».
+            Импорт → Загрузить → выберите CSV → Разделитель «точка с запятоййй».
             Быстрый старт Google Таблиц:{" "}
             <a
               className="underline text-indigo-300 hover:text-indigo-200"
