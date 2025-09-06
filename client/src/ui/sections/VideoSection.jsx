@@ -24,15 +24,15 @@ export default function VideoSection({
         — ownerId и videoId подставятся автоматически. Можно указать вручную
         ниже.
       </p>
-      <div className="flex gap-2 mb-3">
+      <div className="flex flex-col sm:flex-row gap-2 mb-3 w-full">
         <input
-          className="border border-white/20 bg-black/20 text-gray-100 placeholder-gray-400 rounded px-3 py-2 flex-1 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+          className="border border-white/20 bg-black/20 text-gray-100 placeholder-gray-400 rounded px-3 py-2 flex-1 min-w-0 w-full focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
           placeholder="https://vk.com/video-OWNER_VIDEO"
           value={videoUrl}
           onChange={(e) => setVideoUrl(e.target.value)}
         />
         <button
-          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition"
+          className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition shrink-0 whitespace-nowrap w-full sm:w-auto"
           onClick={onParseVideo}
         >
           Распарсить
