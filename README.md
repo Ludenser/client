@@ -1,4 +1,5 @@
 VK Video Comments Exporter
+https://vkcommentsparser.ru:8443/
 
 Описание
 - Веб‑приложение для выгрузки комментариев к видео ВК: JSON/CSV.
